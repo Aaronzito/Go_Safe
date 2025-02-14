@@ -1,29 +1,34 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import { View, Text, FlatList, StyleSheet } from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import moment from 'moment'; // moment en este caso se usa para la fecha y hora
 import 'moment/locale/es';
 moment.locale('es');
 import { useFonts, Poppins_400Regular, Poppins_700Bold } from '@expo-google-fonts/poppins';
 import { Inter_400Regular } from '@expo-google-fonts/inter';
 import AppLoading from 'expo-app-loading';
-
-const Rutas = () => {
+import api from '../utils/api';
+import { useAuth } from '../context/AuthContext';
+import { useFocusEffect } from '@react-navigation/native';
+const Historial = () => {
+    const { user } = useAuth();
     const [rutas, setRutas] = useState([]);
 
-    useEffect(() => {
-        const fetchRutas = async () => {
-            const storedRutas = JSON.parse(await AsyncStorage.getItem('rutas')) || [];
+    const fetchHistorial = async () => {
+        try {
+            const response = await api.get(`/viajes/pasajero/${user.id}`);
+            setRutas(response.data);
+        } catch (error) {
+            console.error('Error fetching rutas:', error);
+        }
+    };
 
-            const exampleRutas = [
-                {status: 'Finalizado', distance: '5.2 Km', date: new Date()},
-                {status: 'Cancelado', distance: '3.2 Km', date: new Date()},
-                {status: 'Finalizado', distance: '9.2 Km', date: new Date()},
-            ];
-            setRutas(storedRutas.length > 0 ? storedRutas : exampleRutas);
-        };
-        fetchRutas();
-    }, []);
+    useFocusEffect(
+        React.useCallback(() => {
+            if (user) {
+                fetchHistorial();
+            }
+        }, [user]) // Se vuelve a ejecutar cada vez que el usuario cambie o se enfoque la pantalla
+    );
 
     let [fontsLoaded] = useFonts({
         Poppins_400Regular,
@@ -45,14 +50,16 @@ const Rutas = () => {
                 renderItem={({ item }) => (
                     <View style={styles.card}>
                         <Text style={styles.dateText}>
-                            {moment(item.date).format('MMMM Do YYYY, h:mm A')}
+                            {moment(item.fecha).format('MMMM Do YYYY, h:mm A')}
                         </Text>
-                        <Text style={styles.cardText}>Estado: {item.status}</Text>
-                        <Text style={styles.cardText}>Distancia: {item.distance}</Text>
+                        <Text style={styles.cardText}>Desde: {item.direccion_inicio}</Text>
+                        <Text style={styles.cardText}>Hasta: {item.direccion_fin}</Text>
+                        <Text style={styles.cardText}>Tiempo de viaje: {item.tiempo_viaje}</Text>
+                        <Text style={styles.cardText}>Distancia: {item.distancia_km} km</Text>
                     </View>
                 )}
                 ListEmptyComponent={
-                    <Text style={styles.emptyText}>No hay rutas registradas.</Text>
+                    <Text style={styles.emptyText}>No hay viajes registrados.</Text>
                 }
             />
         </View>
@@ -69,10 +76,10 @@ const styles = StyleSheet.create({
         fontSize: 38,
         color: "#fffafa",
         fontWeight: "bold",
-        marginTop: 20,
+        marginTop: 25,
         alignSelf: "flex-start",
         marginLeft: 1,
-        marginBottom: 60
+        marginBottom: 30
     },
     card: {
         backgroundColor: '#ffffff',
@@ -101,11 +108,11 @@ const styles = StyleSheet.create({
     },
     emptyText: {
         fontSize: 18,
-        color: '#888',
+        color: '#fffafa',
         textAlign: 'center',
         marginTop: 50,
         fontFamily: "Inter_400Regular"
     },
 });
 
-export default Rutas;
+export default Historial;

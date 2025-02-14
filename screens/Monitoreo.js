@@ -1,62 +1,117 @@
-import React, { useState, useEffect, useCallback } from "react";
-import { View, Text, TextInput, Image, StyleSheet, TouchableOpacity, Modal } from "react-native";
+import React, { useState, useEffect } from "react";
+import { View, Text, StyleSheet, TouchableOpacity, Modal, Linking } from "react-native";
+import * as Location from 'expo-location';
+import { Sharing } from 'expo';
 import Entypo from '@expo/vector-icons/Entypo';
 import { useFonts, Poppins_400Regular, Poppins_700Bold } from '@expo-google-fonts/poppins';
-import { Inter_400Regular } from '@expo-google-fonts/inter';
 import AppLoading from 'expo-app-loading';
-import Mapview, { Marker, Polyline } from 'react-native-maps';
-import * as Location from 'expo-location';
-import MapViewDirections from 'react-native-maps-directions';
+import Mapview, { Marker } from 'react-native-maps';
 import { GooglePlacesAutocomplete } from 'react-native-google-places-autocomplete';
+import MapViewDirecctions from 'react-native-maps-directions';
+import api from "../utils/api";
+import { useAuth } from '../context/AuthContext';
 
 const Monitoreo = () => {
 
     const [modalVisible, setModalVisible] = useState(false);
-
-    //api de google en caso de no funcionar, borre la api y ponga otra
-    const GOOGLE_MAP_KEY = "AIzaSyAovdzv-dciIhuLNI_SlGg8Bz6msikuoo0"
-
-
-    //coordenadas de inicio para el mapa
-    const [origin, setOrigin] = React.useState({
+    const [origin, setOrigin] = useState({
         latitude: 32.436087,
         longitude: -114.759567
     });
-    const [destination, setDestination] = React.useState({
-        latitude: 32.449849,
-        longitude: -114.758752,
-    });
+    const [destination, setDestination] = useState();
+    const [time, setTime] = useState("");
+    const [distance, setDistance] = useState("0.00");
+    const [direccionInicio, setDireccionInicio] = useState("");
+    const [direccionFin, setDireccionFin] = useState("");
 
-    
-    //permisos para obtener ubicacion
-    React.useEffect(() => {
-        getLocationPermission();
-    }, []
-    )
-    async function getLocationPermission() {
-        let { status } = await Location.requestForegroundPermissionsAsync();
-        if (status !== "granted") {
-            alert("Permission denied");
-            return;
-        }
-        let location = await Location.getCurrentPositionAsync({});
-        const current = {
-            latitude: location.coords.latitude,
-            longitude: location.coords.longitude,
+    const { user } = useAuth();
+
+    const GOOGLE_MAP_KEY2 = "AIzaSyAvSJwfk_of_K86P7cy4jAiaKuwXJ7925E";
+
+    useEffect(() => {
+        const getLocationPermission = async () => {
+            let { status } = await Location.requestForegroundPermissionsAsync();
+            if (status !== "granted") {
+                alert("Permission denied");
+                return;
+            }
+            let location = await Location.getCurrentPositionAsync({});
+            const current = {
+                latitude: location.coords.latitude,
+                longitude: location.coords.longitude,
+            };
+            setOrigin(current);
         };
-        setOrigin(current);
-    }
 
+        getLocationPermission();
+    }, []);
 
+    // Obtener tiempo y distancia del viaje
+    const getTravelData = async (origin, destination) => {
+        const url = `https://maps.googleapis.com/maps/api/directions/json?origin=${origin.latitude},${origin.longitude}&destination=${destination.latitude},${destination.longitude}&key=${GOOGLE_MAP_KEY2}`;
+        try {
+            const response = await fetch(url);
+            const data = await response.json();
+            const duration = data.routes[0].legs[0].duration.text;
+            const distance = data.routes[0].legs[0].distance.text;
+    
+            // Convertir tiempo a minutos (extraemos solo el número) y distancia a formato decimal
+            const timeInMinutes = parseInt(duration.split(' ')[0]);  // Convertir el tiempo a número (en minutos)
+            const distanceInKm = parseFloat(distance.split(' ')[0]); // Convertir la distancia a número (en kilómetros)
+    
+            setTime(duration); 
+            setDistance(distance);
+            setDireccionInicio(data.routes[0].legs[0].start_address);
+            setDireccionFin(data.routes[0].legs[0].end_address);
+    
+            const viajeData = {
+                direccion_inicio: data.routes[0].legs[0].start_address,
+                direccion_fin: data.routes[0].legs[0].end_address,
+                fecha: new Date().toISOString(),
+                tiempo_viaje: timeInMinutes,
+                distancia_km: distanceInKm,
+                id_pasajero: user.id,
+            };
+    
+            console.log("Datos listos para enviar a la API:", viajeData)
 
+            try {
+                console.log('Intentado enviar datos a la API...')
+                const response = await api.post(`/viajes/pasajero`, viajeData);
+                if (response.data.message === 'Viaje creado') {
+                    alert('Viaje enviado con éxito!');
+                } else {
+                    setError(response.data.message);
+                }
+            } catch (error) {
+                setError('Error al enviar los datos, intentelo de nuevo.');
+            }
+    
+        } catch (error) {
+            console.error("Error al obtener los datos del viaje:", error);
+        }
+    };
+    
+
+    // Llamar a la función cada vez que se actualiza el destino
+    useEffect(() => {
+        if (origin && destination) {
+            getTravelData(origin, destination);
+        }
+    }, [origin, destination]);
 
     const handleShareLocation = () => {
         setModalVisible(true);
     };
 
-    const handleConfirm = () => {
-        setModalVisible(false);
-        console.log("Ubicación compartida");
+    const handleConfirm = async () => {
+        const locationUrl = `https://www.google.com/maps?q=${origin.latitude},${origin.longitude}`;
+
+        if (await Sharing.isAvailableAsync()) {
+            await Sharing.shareAsync(locationUrl);
+        } else {
+            Linking.openURL(locationUrl);
+        }
     };
 
     const handleCancel = () => {
@@ -66,14 +121,11 @@ const Monitoreo = () => {
     let [fontsLoaded] = useFonts({
         Poppins_400Regular,
         Poppins_700Bold,
-        Inter_400Regular,
     });
 
     if (!fontsLoaded) {
         return <AppLoading />;
     }
-
-
 
     return (
         <View style={styles.container}>
@@ -82,66 +134,76 @@ const Monitoreo = () => {
                 <View style={styles.destinationContainer}>
                     <View style={styles.iconContainer}>
                         <Entypo name="location-pin" size={24} color="white" />
-                    
-                    </View >
+                    </View>
+
+                    {/* Buscador de ubicaciones */}
                     <GooglePlacesAutocomplete
-                        placeholder='Search'
+                        fetchDetails={true}
+                        placeholder="Buscar dirección"
                         onPress={(data, details = null) => {
-                            console.log(data, details);
+                            let destinationCoord = {
+                                latitude: details?.geometry?.location.lat,
+                                longitude: details?.geometry?.location.lng,
+                            };
+                            setDestination(destinationCoord); // Establecer el destino
                         }}
                         query={{
-                            key: GOOGLE_MAP_KEY,
-                            language: 'en',
+                            key: GOOGLE_MAP_KEY2,
+                            language: 'es',
                         }}
                     />
-                    
                 </View>
 
-
-
                 {/* Mapa */}
-                <Mapview style={styles.map}
+                <Mapview
+                    style={styles.map}
                     initialRegion={{
                         latitude: origin.latitude,
                         longitude: origin.longitude,
                         latitudeDelta: 0.09,
-                        longitudeDelta: 0.04
-                    }}>
-
+                        longitudeDelta: 0.04,
+                    }}
+                    onPress={(e) => {
+                        const newCoordinate = e.nativeEvent.coordinate;
+                        setDestination(newCoordinate); // Actualiza el destino
+                    }}
+                >
+                    {/* Marcador origen */}
                     <Marker
+                        title={"Origen"}
+                        description={"Lugar de inicio"}
                         draggable
                         coordinate={origin}
                         onDragEnd={(direction) => setOrigin(direction.nativeEvent.coordinate)}
                     />
-
-                    <Marker
-                        draggable
-                        coordinate={destination}
-                        onDragEnd={(direction) => setDestination(direction.nativeEvent.coordinate)}
-                    />
-                    <MapViewDirections
-                        origin={origin}
-                        destination={destination}
-                        apikey={GOOGLE_MAP_KEY}
-                        strokeColor='blue'
-                        strokeWidth={5}
-                    />
-
+                    {/* Marcador destino */}
+                    {destination && <Marker coordinate={destination} />}
+                    
+                    {/* Ruta desde origen a destino */}
+                    {origin && destination && (
+                        <MapViewDirecctions
+                            origin={origin}
+                            destination={destination}
+                            apikey={GOOGLE_MAP_KEY2}
+                            strokeWidth={4}
+                            strokeColor='#67a0ff'
+                        />
+                    )}
                 </Mapview>
 
+                {/* Información de tiempo y distancia */}
                 <View style={styles.bottomContainer}>
                     <View style={styles.timeContainer}>
                         <Text style={styles.timeLabel}>Tiempo</Text>
-                        <Text style={styles.timeValue}>2:00</Text>
+                        <Text style={styles.timeValue}>{time}</Text>
                     </View>
-
                     <TouchableOpacity style={styles.shareButton} onPress={handleShareLocation}>
-                        <Text style={styles.shareButtonText}>Compartir</Text>
-                        <Text style={styles.shareButtonText}>Ubicación</Text>
+                        <Text style={styles.shareButtonText}>Compartir Ubicación</Text>
                     </TouchableOpacity>
                 </View>
             </View>
 
+            {/* Modal de confirmación */}
             <Modal
                 visible={modalVisible}
                 transparent
@@ -183,8 +245,6 @@ const styles = StyleSheet.create({
         shadowOffset: { width: 0, height: 2 },
         shadowOpacity: 0.1,
         elevation: 2,
-        
-        
     },
     destinationContainer: {
         marginBottom: 16,
@@ -201,14 +261,6 @@ const styles = StyleSheet.create({
         alignItems: "center",
         marginRight: 10,
     },
-    input: {
-        backgroundColor: "#e9e9e9",
-        borderRadius: 15,
-        height: 40,
-        paddingHorizontal: 16,
-        fontSize: 16,
-        flex: 1,
-    },
     map: {
         width: "100%",
         height: 200,
@@ -218,26 +270,9 @@ const styles = StyleSheet.create({
     bottomContainer: {
         width: "100%",
         flexDirection: "row",
-        justifyContent: "space-between",
+        justifyContent: "center",
         alignItems: "center",
         marginTop: 20,
-    },
-    timeContainer: {
-        alignItems: "center",
-        marginRight: 20,
-        marginLeft: 20
-    },
-    timeLabel: {
-        fontFamily: "Inter_400Regular",
-        fontSize: 18,
-        color: "#1c1919",
-        marginBottom: -8,
-    },
-    timeValue: {
-        fontSize: 30,
-        fontWeight: "bold",
-        fontFamily: "Poppins_700Bold",
-        color: "#1c1919",
     },
     shareButton: {
         backgroundColor: "#67a0ff",
@@ -319,40 +354,32 @@ const styles = StyleSheet.create({
         alignSelf: "flex-start",
         marginLeft: 1,
     },
-    googlePlacesText: {
-        color: "white",
-        fontSize: 20,
-        fontWeight: "bold",
-      },
-      textInput: {
-        borderWidth: 1,
-        borderColor: "#ccc",
-        height: 50,
-        borderRadius: 25,
-        paddingLeft: 25,
-        shadowColor: "#000",
-        shadowOffset: { width: 0, height: 1 },
-        shadowOpacity: 0.1,
-        shadowRadius: 3,
-        elevation: 2,
-      },
-      inputContainer: {
-        width: "95%",
-      },
-      textInputFocused: {
-        borderWidth: 1,
-        borderColor: "darkblue",
-        height: 50,
-        borderRadius: 25,
-        paddingLeft: 25,
-        shadowColor: "#000",
-        shadowOffset: { width: 0, height: 1 },
-        shadowOpacity: 0.1,
-        shadowRadius: 3,
-        elevation: 2,
+    bubble: {
+        flexDirection: "row",
+        alignSelf: "flex-start",
+        backgroundColor: "#fff",
+        borderRadius: 6,
+        borderWidth: 0.5,
+        padding: 15,
+        width: 159,
     },
-
+    timeContainer: {
+        alignItems: "center",
+        marginRight: 20,
+        marginLeft: 5,
+    },
+    timeLabel: {
+        fontFamily: "Inter_400Regular",
+        fontSize: 18,
+        color: "#1c1919",
+        marginBottom: -8,
+    },
+    timeValue: {
+        fontSize: 30,
+        fontWeight: "bold",
+        fontFamily: "Poppins_700Bold",
+        color: "#1c1919",
+    },
 });
 
 export default Monitoreo;
-

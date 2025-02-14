@@ -20,8 +20,33 @@ import Historial from './screens/Historial';
 import PerfilUsuario from './screens/PerfilUsuario';
 import ChangePassword from './screens/ChangePassword';
 
+// Pantalla de carga
+import { View, Text, ActivityIndicator, StyleSheet } from 'react-native';
+
+function LoadingScreen() {
+    return (
+        <View style={styles.container}>
+            <ActivityIndicator size="large" color="#0000ff" />
+            <Text>Cargando...</Text>
+        </View>
+    );
+}
+
+const styles = StyleSheet.create({
+    container: {
+        flex: 1,
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+});
+
+// AuthFlow - Lógica de autenticación
 function AuthFlow() {
-    const { isAuthenticated } = useAuth(); 
+    const { isAuthenticated, loading } = useAuth(); 
+
+    if (loading) {
+        return <LoadingScreen />;
+    }
 
     return isAuthenticated ? <MainTabs /> : <AuthNavigator />;
 }
@@ -118,16 +143,16 @@ function MainTabs() {
                 tabBarActiveTintColor: 'black',
                 tabBarInactiveTintColor: 'gray',
                 tabBarStyle: {
-                    height: 80, // Ajusta el margen superior de la barra
-                    alignItems: 'center', // Centra los elementos en la barra
+                    height: 80,
+                    alignItems: 'center',
                 },
                 tabBarLabelStyle: {
-                    fontSize: 12, // Tamaño del texto
-                    textAlign: 'center', // Centra el texto
+                    fontSize: 12,
+                    textAlign: 'center',
                 },
                 tabBarIconStyle: {
-                    size: 30, // Ajusta el tamaño del ícono
-                    alignSelf: 'center', // Centra el ícono
+                    size: 30,
+                    alignSelf: 'center',
                 },
             }}
         >
@@ -178,7 +203,6 @@ function MainTabs() {
         </Tab.Navigator>
     );
 }
-
 
 // Main Navigation
 export default function Navigation() {

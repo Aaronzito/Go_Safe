@@ -1,30 +1,44 @@
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, SafeAreaView } from "react-native";
+import { View, Text, TextInput, TouchableOpacity, StyleSheet } from "react-native";
 import React, { useState } from "react";
 import { useFonts, Poppins_400Regular, Poppins_700Bold } from '@expo-google-fonts/poppins';
 import { Inter_400Regular } from '@expo-google-fonts/inter';
 import AppLoading from 'expo-app-loading';
+import api from '../utils/api';
+import { useAuth } from '../context/AuthContext';
 
 const ChangePassword = () => {
-
-    const [password, setPassword] = useState('');
+    const { user } = useAuth();
+    const [contraseña, setContraseña] = useState('');
     const [confirmPassword, setConfirmPassword] = useState('');
     const [error, setError] = useState('');
 
-    const handleChangePassword = () => {
-        if (!password) {
+    const handleChangePassword = async () => {
+        if (!contraseña) {
             setError('El campo de contraseña no puede estar vacío.');
             return;
         }
-        if (password !== confirmPassword) {
+        if (contraseña !== confirmPassword) {
             setError('Las contraseñas no coinciden.');
             return;
         }
-        
-        setError('');
-        alert('Contraseña cambiada con éxito!');
 
-        setPassword('')
-        setConfirmPassword('')
+        if (contraseña.length < 8) {
+            setError('La contraseña debe tener al menos 8 caracteres.');
+            return;
+        }
+
+        try {
+            const response = await api.put(`/pasajeros/${user.id}/`, { contraseña });
+            if (response.data.message === "Pasajero actualizado") {
+                alert('Contraseña cambiada con éxito!');
+                setContraseña('');
+                setConfirmPassword('');
+            } else {
+                setError(response.data.message);
+            }
+        } catch (error) {
+            setError('Error al cambiar la contraseña. Por favor, inténtelo de nuevo.');
+        }
     };
 
     let [fontsLoaded] = useFonts({
@@ -43,8 +57,8 @@ const ChangePassword = () => {
                 <TextInput
                     placeholder="Ingrese una nueva contraseña"
                     style={styles.input}
-                    value={password}
-                    onChangeText={setPassword}
+                    value={contraseña}
+                    onChangeText={setContraseña}
                     secureTextEntry
                 />
             </View>
