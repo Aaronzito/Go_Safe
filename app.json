@@ -19,8 +19,7 @@
       "adaptiveIcon": {
         "foregroundImage": "./assets/gosafe_logo.png",
         "backgroundColor": "#ffffff"
-      },
-      "package": "com.antoniocrdns.gosafe_app"
+      }
     },
     "web": {
       "favicon": "./assets/gosafe_logo.png"

@@ -1,7 +1,6 @@
-import React, { useState, useEffect } from "react";
-import { View, Text, StyleSheet, TouchableOpacity, Modal, Linking } from "react-native";
+import React, { useState, useEffect, useRef } from "react";
+import { View, Text, StyleSheet, TouchableOpacity, Modal, Share, Alert, Dimensions } from "react-native";
 import * as Location from 'expo-location';
-import { Sharing } from 'expo';
 import Entypo from '@expo/vector-icons/Entypo';
 import { useFonts, Poppins_400Regular, Poppins_700Bold } from '@expo-google-fonts/poppins';
 import AppLoading from 'expo-app-loading';
@@ -23,11 +22,15 @@ const Monitoreo = () => {
     const [distance, setDistance] = useState("0.00");
     const [direccionInicio, setDireccionInicio] = useState("");
     const [direccionFin, setDireccionFin] = useState("");
+    const [viajeData, setViajeData] = useState(null);
 
     const { user } = useAuth();
 
+    const searchRef = useRef(null);
+
     const GOOGLE_MAP_KEY2 = "AIzaSyAvSJwfk_of_K86P7cy4jAiaKuwXJ7925E";
 
+    // Obtener permisos y la ubicación actual (aun sin funcionar)
     useEffect(() => {
         const getLocationPermission = async () => {
             let { status } = await Location.requestForegroundPermissionsAsync();
@@ -55,7 +58,6 @@ const Monitoreo = () => {
             const duration = data.routes[0].legs[0].duration.text;
             const distance = data.routes[0].legs[0].distance.text;
     
-            // Convertir tiempo a minutos (extraemos solo el número) y distancia a formato decimal
             const timeInMinutes = parseInt(duration.split(' ')[0]);  // Convertir el tiempo a número (en minutos)
             const distanceInKm = parseFloat(distance.split(' ')[0]); // Convertir la distancia a número (en kilómetros)
     
@@ -64,7 +66,7 @@ const Monitoreo = () => {
             setDireccionInicio(data.routes[0].legs[0].start_address);
             setDireccionFin(data.routes[0].legs[0].end_address);
     
-            const viajeData = {
+            const tripData = {
                 direccion_inicio: data.routes[0].legs[0].start_address,
                 direccion_fin: data.routes[0].legs[0].end_address,
                 fecha: new Date().toISOString(),
@@ -72,20 +74,10 @@ const Monitoreo = () => {
                 distancia_km: distanceInKm,
                 id_pasajero: user.id,
             };
+
+            setViajeData(tripData);
     
             console.log("Datos listos para enviar a la API:", viajeData)
-
-            try {
-                console.log('Intentado enviar datos a la API...')
-                const response = await api.post(`/viajes/pasajero`, viajeData);
-                if (response.data.message === 'Viaje creado') {
-                    alert('Viaje enviado con éxito!');
-                } else {
-                    setError(response.data.message);
-                }
-            } catch (error) {
-                setError('Error al enviar los datos, intentelo de nuevo.');
-            }
     
         } catch (error) {
             console.error("Error al obtener los datos del viaje:", error);
@@ -105,17 +97,42 @@ const Monitoreo = () => {
     };
 
     const handleConfirm = async () => {
-        const locationUrl = `https://www.google.com/maps?q=${origin.latitude},${origin.longitude}`;
-
-        if (await Sharing.isAvailableAsync()) {
-            await Sharing.shareAsync(locationUrl);
-        } else {
-            Linking.openURL(locationUrl);
-        }
+        onShare();
+        setModalVisible(false);
     };
 
     const handleCancel = () => {
         setModalVisible(false);
+    };
+
+    const handleFinalizarViaje = async () => {
+        try {
+            console.log('Intentando enviar datos a la API...');
+            const response = await api.post(`/viajes/pasajero`, viajeData);
+    
+            if (response.status === 201) {
+                Alert.alert('Éxito', 'Viaje finalizado con éxito');
+
+                console.log('Datos enviados correctamente');
+    
+                // Limpiar todos los estados relacionados con el viaje
+                setDestination(null);
+                setTime(""); 
+                setDistance("0.00"); 
+                setDireccionInicio("");
+                setDireccionFin("");
+                setViajeData(null);
+    
+                if (searchRef.current) {
+                    searchRef.current.setAddressText("");
+                }
+            } else {
+                setError(response.data.message || "Error al finalizar el viaje.");
+            }
+        } catch (error) {
+            console.error("Error al enviar los datos:", error);
+            setError('Error al enviar los datos, inténtelo de nuevo.');
+        }
     };
 
     let [fontsLoaded] = useFonts({
@@ -125,6 +142,30 @@ const Monitoreo = () => {
 
     if (!fontsLoaded) {
         return <AppLoading />;
+    }
+
+    const locationUrl = `https://www.google.com/maps?q=${origin.latitude},${origin.longitude}`;
+
+    const onShare = async () => {
+        try {
+            const result = await Share.share({
+                message: ('¡Hola! Estoy usando Go Safe y me encuentro ahora mismo en: ' + locationUrl),
+            });
+            if (result.action === Share.sharedAction) {
+                if (result.activityType) {
+                    console.log('shared with activity', result.activityType)
+                } else {
+                    console.log('shared')
+                }
+
+            } else if (result.action === Share.dismissedAction) {
+                console.log('dismissed');
+            }
+        }
+        catch (error) {
+            console.log(error.message)
+            Alert("No se pudo compartir la ubicación. Intentelo de nuevo.")
+        }
     }
 
     return (
@@ -138,6 +179,7 @@ const Monitoreo = () => {
 
                     {/* Buscador de ubicaciones */}
                     <GooglePlacesAutocomplete
+                        ref={searchRef}
                         fetchDetails={true}
                         placeholder="Buscar dirección"
                         onPress={(data, details = null) => {
@@ -203,6 +245,34 @@ const Monitoreo = () => {
                 </View>
             </View>
 
+            {/* Botones de Finalizar y Cancelar Viaje */}
+            {destination && (
+                <View style={styles.buttonsContainer}>
+                    {/* Botón para Finalizar Viaje */}
+                    <TouchableOpacity
+                        style={styles.finalizarButton}
+                        onPress={handleFinalizarViaje}
+                    >
+                        <Text style={styles.buttonText}>Finalizar Viaje</Text>
+                    </TouchableOpacity>
+
+                    {/* Botón para Cancelar Viaje */}
+                    <TouchableOpacity
+                        style={styles.cancelarButton}
+                        onPress={() => {
+                            setDestination(null);
+                            if (searchRef.current) {
+                                searchRef.current.clear()
+                                setTime("");
+                                setDistance("0.00")
+                            }
+                        }} // Limpia el estado del destino
+                    >
+                        <Text style={styles.buttonText}>Cancelar Viaje</Text>
+                    </TouchableOpacity>
+                </View>
+            )}
+
             {/* Modal de confirmación */}
             <Modal
                 visible={modalVisible}
@@ -228,65 +298,68 @@ const Monitoreo = () => {
     );
 };
 
+const { width, height } = Dimensions.get("window");
+
 const styles = StyleSheet.create({
     container: {
         flex: 1,
         backgroundColor: "#4ba961",
         alignItems: "center",
-        padding: 20,
+        padding: width * 0.05,
     },
     formContainer: {
         width: "100%",
         backgroundColor: "#fffafa",
-        borderRadius: 15,
-        padding: 20,
-        marginVertical: 100,
+        borderRadius: width * 0.04,
+        padding: width * 0.05,
+        marginVertical: height * 0.02,
         shadowColor: "#000",
         shadowOffset: { width: 0, height: 2 },
         shadowOpacity: 0.1,
         elevation: 2,
     },
     destinationContainer: {
-        marginBottom: 16,
-        marginTop: 10,
+        marginBottom: height * 0.02,
+        marginTop: height * 0.015,
         flexDirection: "row",
         alignItems: "center",
     },
     iconContainer: {
-        width: 32,
-        height: 32,
+        width: width * 0.08,
+        height: width * 0.08,
         backgroundColor: "#ff3131",
-        borderRadius: 20,
+        borderRadius: width * 0.2,
         justifyContent: "center",
         alignItems: "center",
-        marginRight: 10,
+        marginRight: width * 0.03,
     },
     map: {
         width: "100%",
-        height: 200,
-        borderRadius: 8,
-        marginTop: 15,
+        height: height * 0.25,
+        borderRadius: width * 0.02,
+        marginTop: height * 0.02,
     },
     bottomContainer: {
         width: "100%",
         flexDirection: "row",
         justifyContent: "center",
         alignItems: "center",
-        marginTop: 20,
+        marginTop: height * 0.03,
     },
     shareButton: {
         backgroundColor: "#67a0ff",
-        paddingVertical: 8,
-        paddingHorizontal: 16,
-        borderRadius: 15,
+        paddingVertical: height * 0.01,
+        paddingHorizontal: width * 0.04,
+        borderRadius: width * 0.04,
         justifyContent: "center",
         alignItems: "center",
-        width: 170,
+        width: width * 0.45,
+        marginLeft: width * 0.05,
     },
     shareButtonText: {
         fontFamily: "Poppins_700Bold",
         color: "#fffafa",
-        fontSize: 16,
+        fontSize: width * 0.04,
     },
     modalOverlay: {
         flex: 1,
@@ -297,8 +370,8 @@ const styles = StyleSheet.create({
     modalContainer: {
         width: "80%",
         backgroundColor: "#fffafa",
-        borderRadius: 18,
-        padding: 20,
+        borderRadius: width * 0.05,
+        padding: width * 0.05,
         alignItems: "center",
         shadowColor: "#000",
         shadowOffset: { width: 0, height: 2 },
@@ -307,9 +380,9 @@ const styles = StyleSheet.create({
         elevation: 5,
     },
     modalText: {
-        fontSize: 26,
-        marginTop: 30,
-        marginBottom: 50,
+        fontSize: width * 0.07,
+        marginTop: height * 0.04,
+        marginBottom: height * 0.06,
         textAlign: "center",
     },
     modalButtons: {
@@ -320,66 +393,100 @@ const styles = StyleSheet.create({
     noButton: {
         flex: 1,
         backgroundColor: "#ff3131",
-        paddingVertical: 10,
-        marginHorizontal: 5,
-        borderRadius: 15,
+        paddingVertical: height * 0.015,
+        marginHorizontal: width * 0.01,
+        borderRadius: width * 0.04,
         alignItems: "center",
     },
     noButtonText: {
         color: "#fffafa",
-        fontSize: 16,
-        fontFamily: "Poppins_700bold",
+        fontSize: width * 0.04,
+        fontFamily: "Poppins_700Bold",
         fontWeight: "bold",
     },
     yesButton: {
         flex: 1,
         backgroundColor: "#67a0ff",
-        paddingVertical: 10,
-        marginHorizontal: 5,
-        borderRadius: 15,
+        paddingVertical: height * 0.015,
+        marginHorizontal: width * 0.01,
+        borderRadius: width * 0.04,
         alignItems: "center",
     },
     yesButtonText: {
         color: "#fffafa",
-        fontSize: 16,
-        fontFamily: "Poppins_700bold",
+        fontSize: width * 0.04,
+        fontFamily: "Poppins_700Bold",
         fontWeight: "bold",
     },
     titulo: {
         fontFamily: "Poppins_700Bold",
-        fontSize: 38,
+        fontSize: width * 0.1,
         color: "#fffafa",
         fontWeight: "bold",
-        marginTop: 20,
+        marginTop: height * 0.03,
         alignSelf: "flex-start",
-        marginLeft: 1,
+        marginLeft: width * 0.02,
     },
     bubble: {
         flexDirection: "row",
         alignSelf: "flex-start",
         backgroundColor: "#fff",
-        borderRadius: 6,
+        borderRadius: width * 0.02,
         borderWidth: 0.5,
-        padding: 15,
-        width: 159,
+        padding: width * 0.04,
+        width: width * 0.4,
     },
     timeContainer: {
         alignItems: "center",
-        marginRight: 20,
-        marginLeft: 5,
+        marginRight: width * 0.05,
+        marginLeft: width * 0.02,
+        maxWidth: width * 0.8, // Limitar el ancho máximo del contenedor
     },
     timeLabel: {
         fontFamily: "Inter_400Regular",
-        fontSize: 18,
+        fontSize: width * 0.04,
         color: "#1c1919",
-        marginBottom: -8,
+        marginBottom: height * -0.01,
     },
     timeValue: {
-        fontSize: 30,
+        fontSize: width * 0.08,
         fontWeight: "bold",
         fontFamily: "Poppins_700Bold",
         color: "#1c1919",
+        maxWidth: width * 0.6, // Limitar el ancho máximo del texto
+        flexShrink: 1, // Permitir que el texto se reduzca si es necesario
+        overflow: 'hidden', // Evitar desbordamiento
+        textAlign: 'center', // Centrar el texto
+    },
+    buttonsContainer: {
+        width: "100%",
+        alignItems: "center",
+        marginTop: height * 0.005,
+    },
+    finalizarButton: {
+        backgroundColor: "#67a0ff",
+        paddingVertical: height * 0.015,
+        paddingHorizontal: width * 0.06,
+        borderRadius: width * 0.04,
+        marginTop: height * 0.04,
+        marginBottom: height * 0.04,
+        width: "80%",
+        alignItems: "center",
+    },
+    cancelarButton: {
+        backgroundColor: "#ff3131",
+        paddingVertical: height * 0.015,
+        paddingHorizontal: width * 0.06,
+        borderRadius: width * 0.04,
+        width: "80%",
+        alignItems: "center",
+    },
+    buttonText: {
+        fontFamily: "Poppins_700Bold",
+        color: "#fffafa",
+        fontSize: width * 0.04,
     },
 });
+
 
 export default Monitoreo;
