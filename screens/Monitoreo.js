@@ -3,10 +3,9 @@ import { View, Text, StyleSheet, TouchableOpacity, Modal, Share, Alert, Dimensio
 import * as Location from 'expo-location';
 import Entypo from '@expo/vector-icons/Entypo';
 import { useFonts, Poppins_400Regular, Poppins_700Bold } from '@expo-google-fonts/poppins';
-import AppLoading from 'expo-app-loading';
-import Mapview, { Marker } from 'react-native-maps';
+import * as SplashScreen from 'expo-splash-screen';
+import Mapview, { Marker, Polyline } from 'react-native-maps';
 import { GooglePlacesAutocomplete } from 'react-native-google-places-autocomplete';
-import MapViewDirecctions from 'react-native-maps-directions';
 import api from "../utils/api";
 import { useAuth } from '../context/AuthContext';
 
@@ -18,11 +17,13 @@ const Monitoreo = () => {
         longitude: -114.759567
     });
     const [destination, setDestination] = useState();
+    const [userLocation, setUserLocation] = useState(null); // Ubicación actual del usuario
     const [time, setTime] = useState("");
     const [distance, setDistance] = useState("0.00");
     const [direccionInicio, setDireccionInicio] = useState("");
     const [direccionFin, setDireccionFin] = useState("");
     const [viajeData, setViajeData] = useState(null);
+    const [routeCoordinates, setRouteCoordinates] = useState([]); // Almacenar las coordenadas de la ruta
 
     const { user } = useAuth();
 
@@ -30,7 +31,7 @@ const Monitoreo = () => {
 
     const GOOGLE_MAP_KEY2 = "AIzaSyAvSJwfk_of_K86P7cy4jAiaKuwXJ7925E";
 
-    // Obtener permisos y la ubicación actual (aun sin funcionar)
+    // Obtener permisos y la ubicación actual
     useEffect(() => {
         const getLocationPermission = async () => {
             let { status } = await Location.requestForegroundPermissionsAsync();
@@ -43,13 +44,45 @@ const Monitoreo = () => {
                 latitude: location.coords.latitude,
                 longitude: location.coords.longitude,
             };
-            setOrigin(current);
+            setOrigin(current); // Establece la ubicación inicial de origen
+            setUserLocation(current); // Establece la ubicación inicial del usuario
         };
 
         getLocationPermission();
     }, []);
 
-    // Obtener tiempo y distancia del viaje
+    useEffect(() => {
+        const watchLocation = async () => {
+            let { status } = await Location.requestForegroundPermissionsAsync();
+            if (status !== "granted") {
+                alert("Permission denied");
+                return;
+            }
+
+            const subscription = Location.watchPositionAsync(
+                {
+                    accuracy: Location.Accuracy.High,
+                    timeInterval: 1000, // Actualización cada segundo
+                    distanceInterval: 1, // Actualización cada metro
+                },
+                (location) => {
+                    setUserLocation(location.coords);
+                }
+            );
+
+            return subscription;
+        };
+
+        const subscription = watchLocation();
+        
+        return () => {
+            if (subscription) {
+                subscription.remove();
+            }
+        };
+    }, []);
+
+    // Obtener tiempo, distancia y ruta del viaje
     const getTravelData = async (origin, destination) => {
         const url = `https://maps.googleapis.com/maps/api/directions/json?origin=${origin.latitude},${origin.longitude}&destination=${destination.latitude},${destination.longitude}&key=${GOOGLE_MAP_KEY2}`;
         try {
@@ -57,15 +90,20 @@ const Monitoreo = () => {
             const data = await response.json();
             const duration = data.routes[0].legs[0].duration.text;
             const distance = data.routes[0].legs[0].distance.text;
-    
+
             const timeInMinutes = parseInt(duration.split(' ')[0]);  // Convertir el tiempo a número (en minutos)
             const distanceInKm = parseFloat(distance.split(' ')[0]); // Convertir la distancia a número (en kilómetros)
-    
+
             setTime(duration); 
             setDistance(distance);
             setDireccionInicio(data.routes[0].legs[0].start_address);
             setDireccionFin(data.routes[0].legs[0].end_address);
-    
+
+            // Almacenar las coordenadas de la ruta
+            const points = data.routes[0].overview_polyline.points;
+            const decodedPath = decodePolyline(points);
+            setRouteCoordinates(decodedPath);
+
             const tripData = {
                 direccion_inicio: data.routes[0].legs[0].start_address,
                 direccion_fin: data.routes[0].legs[0].end_address,
@@ -76,14 +114,44 @@ const Monitoreo = () => {
             };
 
             setViajeData(tripData);
-    
-            console.log("Datos listos para enviar a la API:", viajeData)
-    
         } catch (error) {
             console.error("Error al obtener los datos del viaje:", error);
         }
     };
-    
+
+    // Decodificar las coordenadas de la ruta de la respuesta de Google Maps
+    const decodePolyline = (encoded) => {
+        let len = encoded.length;
+        let index = 0;
+        let lat = 0;
+        let lng = 0;
+        let coordinates = [];
+
+        while (index < len) {
+            let b, shift = 0, result = 0;
+            do {
+                b = encoded.charCodeAt(index++) - 63;
+                result |= (b & 0x1f) << shift;
+                shift += 5;
+            } while (b >= 0x20);
+            let deltaLat = ((result & 1) ? ~(result >> 1) : (result >> 1));
+            lat += deltaLat;
+
+            shift = 0;
+            result = 0;
+            do {
+                b = encoded.charCodeAt(index++) - 63;
+                result |= (b & 0x1f) << shift;
+                shift += 5;
+            } while (b >= 0x20);
+            let deltaLng = ((result & 1) ? ~(result >> 1) : (result >> 1));
+            lng += deltaLng;
+
+            coordinates.push({ latitude: (lat / 1E5), longitude: (lng / 1E5) });
+        }
+
+        return coordinates;
+    };
 
     // Llamar a la función cada vez que se actualiza el destino
     useEffect(() => {
@@ -105,24 +173,39 @@ const Monitoreo = () => {
         setModalVisible(false);
     };
 
+    const cancelViaje = () => {
+        setDestination(null);
+        setTime("");
+        setDistance("0.00");
+        setDireccionInicio("");
+        setDireccionFin("");
+        setViajeData(null);
+        setRouteCoordinates([]);
+    
+        setOrigin(userLocation);
+    
+        if (searchRef.current) {
+            searchRef.current.clear();
+        }
+    };
+
     const handleFinalizarViaje = async () => {
         try {
             console.log('Intentando enviar datos a la API...');
             const response = await api.post(`/viajes/pasajero`, viajeData);
-    
+
             if (response.status === 201) {
                 Alert.alert('Éxito', 'Viaje finalizado con éxito');
-
                 console.log('Datos enviados correctamente');
-    
-                // Limpiar todos los estados relacionados con el viaje
                 setDestination(null);
                 setTime(""); 
                 setDistance("0.00"); 
                 setDireccionInicio("");
                 setDireccionFin("");
                 setViajeData(null);
-    
+                setOrigin(userLocation);
+                setRouteCoordinates([]);
+                
                 if (searchRef.current) {
                     searchRef.current.setAddressText("");
                 }
@@ -140,33 +223,45 @@ const Monitoreo = () => {
         Poppins_700Bold,
     });
 
+    // Usar SplashScreen para mostrar la pantalla de carga mientras las fuentes no estén cargadas
+    useEffect(() => {
+        if (fontsLoaded) {
+            SplashScreen.hide(); // Ocultar el splash screen cuando las fuentes están cargadas
+        }
+    }, [fontsLoaded]);
+
     if (!fontsLoaded) {
-        return <AppLoading />;
+        SplashScreen.preventAutoHideAsync(); // Evitar que el splash screen se oculte automáticamente
+        return null; // Retornar null mientras las fuentes no están listas
     }
 
-    const locationUrl = `https://www.google.com/maps?q=${origin.latitude},${origin.longitude}`;
+    const locationUrl = userLocation
+    ? `https://www.google.com/maps?q=${userLocation.latitude},${userLocation.longitude}` 
+    : null; 
 
     const onShare = async () => {
-        try {
-            const result = await Share.share({
-                message: ('¡Hola! Estoy usando Go Safe y me encuentro ahora mismo en: ' + locationUrl),
-            });
-            if (result.action === Share.sharedAction) {
-                if (result.activityType) {
-                    console.log('shared with activity', result.activityType)
-                } else {
-                    console.log('shared')
+        if (locationUrl) {
+            try {
+                const result = await Share.share({
+                    message: `¡Hola! Estoy usando Go Safe y me encuentro ahora mismo en: ${locationUrl}`,
+                });
+                if (result.action === Share.sharedAction) {
+                    if (result.activityType) {
+                        console.log("shared with activity", result.activityType);
+                    } else {
+                        console.log("shared");
+                    }
+                } else if (result.action === Share.dismissedAction) {
+                    console.log("dismissed");
                 }
-
-            } else if (result.action === Share.dismissedAction) {
-                console.log('dismissed');
+            } catch (error) {
+                console.log(error.message);
+                Alert.alert("No se pudo compartir la ubicación. Intentelo de nuevo.");
             }
+        } else {
+            Alert.alert("Aún no se ha obtenido la ubicación.");
         }
-        catch (error) {
-            console.log(error.message)
-            Alert("No se pudo compartir la ubicación. Intentelo de nuevo.")
-        }
-    }
+    };
 
     return (
         <View style={styles.container}>
@@ -187,7 +282,7 @@ const Monitoreo = () => {
                                 latitude: details?.geometry?.location.lat,
                                 longitude: details?.geometry?.location.lng,
                             };
-                            setDestination(destinationCoord); // Establecer el destino
+                            setDestination(destinationCoord);
                         }}
                         query={{
                             key: GOOGLE_MAP_KEY2,
@@ -220,13 +315,20 @@ const Monitoreo = () => {
                     />
                     {/* Marcador destino */}
                     {destination && <Marker coordinate={destination} />}
+                    {/* Marcador que sigue la ubicación del usuario */}
+                    {userLocation && (
+                        <Marker
+                            coordinate={userLocation}
+                            title="Mi ubicación"
+                            description="Ubicación actual del usuario"
+                            pinColor="#67a0ff"
+                        />
+                    )}
                     
                     {/* Ruta desde origen a destino */}
-                    {origin && destination && (
-                        <MapViewDirecctions
-                            origin={origin}
-                            destination={destination}
-                            apikey={GOOGLE_MAP_KEY2}
+                    {routeCoordinates.length > 0 && (
+                        <Polyline
+                            coordinates={routeCoordinates}
                             strokeWidth={4}
                             strokeColor='#67a0ff'
                         />
@@ -257,17 +359,7 @@ const Monitoreo = () => {
                     </TouchableOpacity>
 
                     {/* Botón para Cancelar Viaje */}
-                    <TouchableOpacity
-                        style={styles.cancelarButton}
-                        onPress={() => {
-                            setDestination(null);
-                            if (searchRef.current) {
-                                searchRef.current.clear()
-                                setTime("");
-                                setDistance("0.00")
-                            }
-                        }} // Limpia el estado del destino
-                    >
+                    <TouchableOpacity style={styles.cancelarButton} onPress={cancelViaje}>
                         <Text style={styles.buttonText}>Cancelar Viaje</Text>
                     </TouchableOpacity>
                 </View>
