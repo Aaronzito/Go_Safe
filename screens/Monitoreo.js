@@ -62,8 +62,8 @@ const Monitoreo = () => {
             const subscription = Location.watchPositionAsync(
                 {
                     accuracy: Location.Accuracy.High,
-                    timeInterval: 1000, // Actualización cada segundo
-                    distanceInterval: 1, // Actualización cada metro
+                    timeInterval: 5000, // Actualización cada segundo
+                    distanceInterval: 50, // Actualización cada metro
                 },
                 (location) => {
                     setUserLocation(location.coords);
@@ -223,16 +223,15 @@ const Monitoreo = () => {
         Poppins_700Bold,
     });
 
-    // Usar SplashScreen para mostrar la pantalla de carga mientras las fuentes no estén cargadas
     useEffect(() => {
         if (fontsLoaded) {
-            SplashScreen.hide(); // Ocultar el splash screen cuando las fuentes están cargadas
+            SplashScreen.hide();
         }
     }, [fontsLoaded]);
 
     if (!fontsLoaded) {
-        SplashScreen.preventAutoHideAsync(); // Evitar que el splash screen se oculte automáticamente
-        return null; // Retornar null mientras las fuentes no están listas
+        SplashScreen.preventAutoHideAsync();
+        return null;
     }
 
     const locationUrl = userLocation
