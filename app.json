@@ -22,10 +22,15 @@
       },
       "package": "com.antoniocrdns.gosafe_app",
       "permissions": [
-      "ACCESS_FINE_LOCATION",
-      "ACCESS_COARSE_LOCATION",
-      "INTERNET"
-      ]
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION",
+        "INTERNET"
+      ],
+      "config": {
+        "googleMaps": {
+          "apiKey": "AIzaSyAvSJwfk_of_K86P7cy4jAiaKuwXJ7925E"
+        }
+  }
     },
     "web": {
       "favicon": "./assets/gosafe_logo.png"
